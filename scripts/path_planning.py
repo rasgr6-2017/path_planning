@@ -1,17 +1,18 @@
 #!/usr/bin/env python
-# import roslib
+import roslib
 import sys
-# import rospy
+import rospy
+from std_msgs.msg import Float32MultiArray
 import numpy as np
 import cv2
-# from cv_bridge import CvBridge, CvBridgeError
+from cv_bridge import CvBridge, CvBridgeError
 from skimage.morphology import label
 from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 import time
 import math
-# import bezier
 import multiprocessing
+
 
 
 class AStarNode:
@@ -60,6 +61,16 @@ class RoadGraph:
             print("Non-existing edge! Returning empty list!")
             return empty_list
 
+    def get_length(self, key):
+        key_inv = (key[1], key[0])
+        if key in self.connection:
+            return self.edge_dict[key][0]
+        elif key_inv in self.connection:
+            return self.edge_dict[key_inv][0]
+        else:
+            print("Non-existing edge! Returning zero!")
+            return 0
+
     def node_to_node(self, node_1, node_2):
         """find whether there is an edge between node_1 and node_2"""
         key_for = (node_1, node_2)
@@ -93,6 +104,15 @@ class RoadGraph:
 
     def a_star_path(self, node_1, node_2):
         """node_1 and node_2 are number of node, not the coordinate"""
+
+        if node_1 == node_2:
+            print "Warning: two nodes are the same!"
+
+        for con in self.connection:
+            if con == tuple([node_1, node_2]) or con == tuple([node_2, node_1]):
+                print "Warning: directly connected nodes!"
+                return self.get_edge(con), con
+
         closed_node = list()
 
         n1 = AStarNode(node_1, -1, 0, self.heuristic(node_1, node_2))
@@ -162,6 +182,51 @@ class RoadGraph:
                     current_node = node_left
                     break
         return path_edges, path_index
+
+    def pixel_path(self, p1, p_2, ps=None, pe=None, interval=16):
+        """p1, p_2 are connected nodes in the order you want to go; p are optional point where you are"""
+        if ps is None:
+            ps = self.nodes[p1]
+
+        if pe is None:
+            pe = self.nodes[p_2]
+        point1 = list(ps)
+        point2 = list(pe)
+        temp_edge = list(self.get_edge((p1, p_2)))
+        cut1 = temp_edge.index(point1)
+        cut2 = temp_edge.index(point2)
+        if cut1 <= cut2:
+            temp_edge = temp_edge[cut1:(cut2+1)]
+        else:
+            temp_edge = temp_edge[cut2:(cut1+1)]
+        pixel_path = list()
+        pixel_path.append(point1)
+        current_pixel = point1
+        temp_edge.remove(point1)
+        min_dist = 9999.0
+        while temp_edge.__len__() > 0:
+            for e_i in xrange(len(temp_edge) - 1, -1, -1):
+                pixel = temp_edge[e_i]
+                di = diagonal_distance(current_pixel, pixel)
+                if di < interval:
+                    if pixel == point2:
+                        pixel_path.append(point2)
+                        return pixel_path
+                    else:
+                        temp_edge.remove(pixel)
+                    continue
+                else:
+                    if di < min_dist:
+                        min_dist = di
+                        candidate = pixel
+            pixel_path.append(candidate)
+            if candidate == point2:
+                return pixel_path
+            current_pixel = candidate
+            min_dist = 9999.0
+            temp_edge.remove(candidate)
+        return pixel_path
+        print "Warning: due to some reason, end node is not in the pixel path"
 
 
 def white_to_black(a, b):
@@ -349,9 +414,8 @@ def zs_thinning(img):
     return image
 
 
-def is_neighbour(pair1, pair2):
+def is_neighbour(pair1, pair2, neighbour_range=2):
     """check whether two point(represented by pair) are neighbour or not"""
-    neighbour_range = 2
     if -neighbour_range <= pair1[0] - pair2[0] <= neighbour_range and \
             -neighbour_range <= pair1[1] - pair2[1] <= neighbour_range:
         return True
@@ -366,6 +430,10 @@ def path_any_point(road_graph, map_img, point_1, point_2):
     # this to a degree can represent the expansion of walls and obstacles
     kernel1 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
     temp_map = cv2.erode(temp_map, kernel1, iterations=2)
+
+    # plt.matshow(temp_map)
+    # plt.show()
+    # plt.pause(10)
 
     if temp_map[point_1[0]][point_1[1]] == 0 or temp_map[point_2[0]][point_2[1]] == 0:
         print("invalid starting or ending position! You are colliding the wall there!")
@@ -383,9 +451,11 @@ def path_any_point(road_graph, map_img, point_1, point_2):
     for i in range(road_graph.edge_list.__len__()):
         edge_i = road_graph.edge_list[i]
         for j in range(edge_i.__len__()):
+            # find the point closest to point_1 and point_2
             point_j = edge_i[j]
             dist_1 = diagonal_distance(point_j, point_1)
             dist_2 = diagonal_distance(point_j, point_2)
+            # try to find the j_th point in i_th edge
             if dist_1 < min_1:
                 min_1 = dist_1
                 index_1 = [i, j]
@@ -394,77 +464,116 @@ def path_any_point(road_graph, map_img, point_1, point_2):
                 index_2 = [i, j]
 
     # following process is toooooo clumsy
+    # get the node number for the edge that point_1 is closest to
     node_11 = road_graph.connection[index_1[0]][0]
     node_12 = road_graph.connection[index_1[0]][1]
+    # for point_2
     node_21 = road_graph.connection[index_2[0]][0]
     node_22 = road_graph.connection[index_2[0]][1]
+
+    i_1 = index_1[0]
+    j_1 = index_1[1]
+    i_2 = index_2[0]
+    j_2 = index_2[1]
+
+    if (node_11 == node_21 and node_12 == node_22) or (node_11 == node_22 and node_12 == node_21):
+        path_seg = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1], pe=road_graph.edge_list[i_2][j_2])
+        return path_seg, [(node_12, node_11)]
+    """
+    elif node_11 == node_21:
+        path_seg1 = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
+        path_seg2 = road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
+        path_seg = path_seg1 + path_seg2
+        return path_seg, [(node_12, node_11), (node_21, node_22)]
+    elif node_11 == node_22:
+        path_seg1 = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
+        path_seg2 = road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
+        path_seg = path_seg1 + path_seg2
+        return path_seg, [(node_12, node_11), (node_22, node_21)]
+    elif node_12 == node_21:
+        path_seg1 = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
+        path_seg2 = road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
+        path_seg = path_seg1 + path_seg2
+        return path_seg, [(node_11, node_12), (node_21, node_22)]
+    elif node_12 == node_22:
+        path_seg1 = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
+        path_seg2 = road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
+        path_seg = path_seg1 + path_seg2
+        return path_seg, [(node_11, node_12), (node_22, node_21)]
+    """
+
+    # can be optimized, not all path needs to be stored and transferred
     path_1, ind1 = road_graph.a_star_path(node_11, node_21)
     path_2, ind2 = road_graph.a_star_path(node_11, node_22)
     path_3, ind3 = road_graph.a_star_path(node_12, node_21)
     path_4, ind4 = road_graph.a_star_path(node_12, node_22)
 
-    l1 = 0
-    l2 = 0
-    l3 = 0
-    l4 = 0
-    for item in path_1:
-        l1 = l1 + item.__len__()
-    for item in path_2:
-        l2 = l2 + item.__len__()
-    for item in path_3:
-        l3 = l3 + item.__len__()
-    for item in path_4:
-        l4 = l4 + item.__len__()
+    if isinstance(ind1, tuple):
+        ind1 = [ind1]
+    if isinstance(ind2, tuple):
+        ind2 = [ind2]
+    if isinstance(ind3, tuple):
+        ind3 = [ind3]
+    if isinstance(ind4, tuple):
+        ind4 = [ind4]
+    #
+    # l1 = int(diagonal_distance(point_1, road_graph.nodes[node_11]) +
+    #          diagonal_distance(point_2, road_graph.nodes[node_21]))
+    # l2 = int(diagonal_distance(point_1, road_graph.nodes[node_11]) +
+    #          diagonal_distance(point_2, road_graph.nodes[node_22]))
+    # l3 = int(diagonal_distance(point_1, road_graph.nodes[node_12]) +
+    #          diagonal_distance(point_2, road_graph.nodes[node_21]))
+    # l4 = int(diagonal_distance(point_1, road_graph.nodes[node_12]) +
+    #          diagonal_distance(point_2, road_graph.nodes[node_22]))
+
+    l1 = abs(index_1[1] - road_graph.edge_list[index_1[0]].index(list(road_graph.nodes[node_11]))) + \
+         abs(index_2[1] - road_graph.edge_list[index_2[0]].index(list(road_graph.nodes[node_21])))
+    l2 = abs(index_1[1] - road_graph.edge_list[index_1[0]].index(list(road_graph.nodes[node_11]))) + \
+         abs(index_2[1] - road_graph.edge_list[index_2[0]].index(list(road_graph.nodes[node_22])))
+    l3 = abs(index_1[1] - road_graph.edge_list[index_1[0]].index(list(road_graph.nodes[node_12]))) + \
+         abs(index_2[1] - road_graph.edge_list[index_2[0]].index(list(road_graph.nodes[node_21])))
+    l4 = abs(index_1[1] - road_graph.edge_list[index_1[0]].index(list(road_graph.nodes[node_12]))) + \
+         abs(index_2[1] - road_graph.edge_list[index_2[0]].index(list(road_graph.nodes[node_22])))
+
+    for it in ind1:
+        l1 = l1 + road_graph.get_length(it)
+    for it in ind2:
+        l2 = l2 + road_graph.get_length(it)
+    for it in ind3:
+        l3 = l3 + road_graph.get_length(it)
+    for it in ind4:
+        l4 = l4 + road_graph.get_length(it)
 
     if l1 < l2 and l1 < l3 and l1 < l4:
-        i = index_1[0]
-        j = index_1[1]
-        path_1.insert(0, road_graph.edge_list[i])
-        ind1.insert(0, tuple(road_graph.edge_list[i][j]))
-        i = index_2[0]
-        j = index_2[1]
-        path_1.append(road_graph.edge_list[i])
-        ind1.append(tuple(road_graph.edge_list[i][j]))
-        return path_1, ind1
+        path_seg = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
+        for it in ind1:
+            path_seg += road_graph.pixel_path(it[0], it[1])
+        path_seg += road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
+        return path_seg, ind1
     elif l2 < l1 and l2 < l3 and l2 < l4:
-        i = index_1[0]
-        j = index_1[1]
-        path_2.insert(0, road_graph.edge_list[i])
-        ind2.insert(0, tuple(road_graph.edge_list[i][j]))
-        i = index_2[0]
-        j = index_2[1]
-        path_2.append(road_graph.edge_list[i])
-        ind2.append(tuple(road_graph.edge_list[i][j]))
-        return path_2, ind2
+        path_seg = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
+        for it in ind2:
+            path_seg += road_graph.pixel_path(it[0], it[1])
+        path_seg += road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
+        return path_seg, ind2
     elif l3 < l1 and l3 < l2 and l3 < l4:
-        i = index_1[0]
-        j = index_1[1]
-        path_3.insert(0, road_graph.edge_list[i])
-        ind3.insert(0, tuple(road_graph.edge_list[i][j]))
-        i = index_2[0]
-        j = index_2[1]
-        path_3.append(road_graph.edge_list[i])
-        ind3.append(tuple(road_graph.edge_list[i][j]))
-        return path_3, ind3
+        path_seg = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
+        for it in ind3:
+            path_seg += road_graph.pixel_path(it[0], it[1])
+        path_seg += road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
+        return path_seg, ind3
     else:
-        i = index_1[0]
-        j = index_1[1]
-        path_4.insert(0, road_graph.edge_list[i])
-        ind4.insert(0, tuple(road_graph.edge_list[i][j]))
-        i = index_2[0]
-        j = index_2[1]
-        path_4.append(road_graph.edge_list[i])
-        ind4.append(tuple(road_graph.edge_list[i][j]))
-        return path_4, ind4
+        path_seg = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
+        for it in ind4:
+            path_seg += road_graph.pixel_path(it[0], it[1])
+        path_seg += road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
+        return path_seg, ind4
 
 
 def diagonal_distance(point_a, point_b):
-    dx = abs(point_a[0] - point_b[0])
-    dy = abs(point_a[1] - point_b[1])
-    if dx > dy:
-        return dx
-    else:
-        return dy
+    dx = float(abs(point_a[0] - point_b[0]))
+    dy = float(abs(point_a[1] - point_b[1]))
+    return math.sqrt(dx*dx + dy*dy)
 
 
 def mid_point(a1, a2):
@@ -474,223 +583,225 @@ def mid_point(a1, a2):
     return b
 
 
+def pixeltotrue(pi, pj):
+	x_max = 120.
+	y_max = 120.
+	
+	return [ (2.4/x_max)*(x_max - 1 - pj) - 0.44, -(2.4/y_max) * pi + 0.2 ]
+
+
 if __name__ == "__main__":
 
-    # get an image representing the obstacles and walls
-    img_list = ["maze_2017.png", "maze2_more.png", "maze2_less.png"]
-    img_path = "/home/ras16/catkin_ws/src/path_planning/scripts/"
+	# get an image representing the obstacles and walls
+	img_list = ["maze_2017.png", "maze2_more.png", "maze2_less.png"]
+	img_path = "/home/ras16/catkin_ws/src/path_planning/scripts/"
 
-    for img_n in range(1):
-        t_start = time.time()
-        original = cv2.imread(img_path + img_list[img_n])
+	t_start = time.time()
+	original = cv2.imread(img_path + img_list[0])
 
-        height, width = original.shape[:2]
+	height, width = original.shape[:2]
 
-        # resize the image to get lower resolution
-        # this makes computational cost decrease much
-        # original = cv2.resize(original, (int(0.2 * width), int(0.2 * height)), interpolation=cv2.INTER_CUBIC)
-        original = cv2.resize(original, (120, 120), interpolation=cv2.INTER_CUBIC)
-        print "image height" + str(int(0.2 * height)) + "image width" + str(int(0.2 * width))
+	# resize the image to get lower resolution
+	# this makes computational cost decrease much
+	# original = cv2.resize(original, (int(0.2 * width), int(0.2 * height)), interpolation=cv2.INTER_CUBIC)
+	original = cv2.resize(original, (120, 120), interpolation=cv2.INTER_CUBIC)
+	print "image height" + str(120) + "image width" + str(120)
 
-        gray = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
-        # use only binary map
-        # with probabilistic occupancy, the threshold of this should be set carefully
-        ret3, my_map_original = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	gray = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
+	# use only binary map
+	# with probabilistic occupancy, the threshold of this should be set carefully
+	ret3, my_map_original = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        t_end = time.time()
-        print "time for preparation: " + str(t_end - t_start)
+	t_end = time.time()
+	print "time for preparation: " + str(t_end - t_start)
 
-        t_start = time.time()
-        # do erosion first, and do thinning
-        # this Zhang Suen thinning guarantees that skeleton will not be cut at any point
-        thinning = zs_thinning(my_map_original)
-        t_end = time.time()
-        print "time for thinning: " + str(t_end - t_start)
+	t_start = time.time()
+	# do erosion first, and do thinning
+	# this Zhang Suen thinning guarantees that skeleton will not be cut at any point
+	thinning = zs_thinning(my_map_original)
+	t_end = time.time()
+	print "time for thinning: " + str(t_end - t_start)
 
-        joint_count = 0
+	t_start = time.time()
+	joint_count = 0
 
-        node_list = []
+	node_list = []
 
-        # find the joint node of branching point
-        th, tw = thinning.shape[:2]
-    for pi in range(1, th - 1):
-        for pj in range(1, tw - 1):
-            if thinning[pi][pj] == 0:
-                p2 = thinning[pi - 1][pj]
-                p3 = thinning[pi - 1][pj + 1]
-                p4 = thinning[pi][pj + 1]
-                p5 = thinning[pi + 1][pj + 1]
-                p6 = thinning[pi + 1][pj]
-                p7 = thinning[pi + 1][pj - 1]
-                p8 = thinning[pi][pj - 1]
-                p9 = thinning[pi - 1][pj - 1]
+	# find the joint node of branching point
+	th, tw = thinning.shape[:2]
 
-                black_n = (8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9))
+	for pi in range(1, th - 1):
+		for pj in range(1, tw - 1):
+			if thinning[pi][pj] == 0:
+				p2 = thinning[pi - 1][pj]
+				p3 = thinning[pi - 1][pj + 1]
+				p4 = thinning[pi][pj + 1]
+				p5 = thinning[pi + 1][pj + 1]
+				p6 = thinning[pi + 1][pj]
+				p7 = thinning[pi + 1][pj - 1]
+				p8 = thinning[pi][pj - 1]
+				p9 = thinning[pi - 1][pj - 1]
 
-                if 1 < black_n < 3 or black_n > 5:
-                    continue
+				black_n = (8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9))
 
-                if (white_to_black(p2, p3) + white_to_black(p3, p4) +
-                        white_to_black(p4, p5) + white_to_black(p5, p6) +
-                        white_to_black(p6, p7) + white_to_black(p7, p8) +
-                        white_to_black(p8, p9) + white_to_black(p9, p2) >= 3):
-                    joint_count = joint_count + 1
-                    thinning[pi][pj] = 150
-                    node_list.append((pi, pj))
+				if 1 < black_n < 3 or black_n > 5:
+					continue
+				
+				# point with at least 3 neighbor points who are not neighbor to each other
+				if (white_to_black(p2, p3) + white_to_black(p3, p4) +
+						white_to_black(p4, p5) + white_to_black(p5, p6) +
+						white_to_black(p6, p7) + white_to_black(p7, p8) +
+						white_to_black(p8, p9) + white_to_black(p9, p2) >= 3):
+					joint_count = joint_count + 1
+					thinning[pi][pj] = 150
+					node_list.append((pi, pj))
+				# point at the end of an edge
+				if black_n == 1:
+					thinning[pi][pj] = 150
+					joint_count = joint_count + 1
+					node_list.append((pi, pj))
 
-                if black_n == 1:
-                    thinning[pi][pj] = 150
-                    joint_count = joint_count + 1
-                    node_list.append((pi, pj))
+	voronoi_graph = RoadGraph(node_list)
+	# print node_list
 
-    voronoi_graph = RoadGraph(node_list)  # print joint_count
-    # print node_list
+	# to show the node with a larger square dot
+	# in labelling of connected components,
+	# it is also used as edge cutting
+	for pi, pj in node_list:
+		for ia in range(-1, 2):
+			for ja in range(-1, 2):
+				thinning[pi + ia][pj + ja] = 1
 
-    # to show the node with a larger square dot
-    # in labelling of connected components,
-    # it is also used as edge cutting
-    for pi, pj in node_list:
-        for ia in range(-1, 2):
-            for ja in range(-1, 2):
-                thinning[pi + ia][pj + ja] = 1
+	# to label all the connected component
+	res, label_num = label(thinning, neighbors=8, background=1, return_num=True)
+	res = res + 1 # to cope with the problem of old version regionprops
+	props = regionprops(res)
 
-    # to label all the connected component
-    res, label_num = label(thinning, neighbors=8, background=1, return_num=True)
-    res = res + 1
-    # print res
-    props = regionprops(res)
+	print "label number " + str(label_num) + "  " + str(len(props))
 
-    print "label number " + str(label_num) + "  " + str(len(props))
+	fig = plt.figure()
+	ax = fig.add_subplot(111)
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
+	ax.matshow(res)
 
-    ax.matshow(res)
-        
-    num_n = 0
-    for n_i, n_j in node_list:
-		ax.text(n_j, n_i, str(num_n), color='red', fontsize=12)
-		num_n += 1
+	num_n = 0
+	# show the ndoe with their number in node_list
+	for n_i, n_j in node_list:
+	 	ax.text(n_j, n_i, str(num_n), color='red', fontsize=12)
+	 	num_n += 1
 
-    # to show the walls in original map which is removed from the map
-    for pi in range(1, th - 1):
-        for pj in range(1, tw - 1):
-            if my_map_original[pi][pj] == 0:
-                res[pi][pj] = label_num + 2
+	# to show the walls in original map which is removed from the map
+	for pi in range(1, th - 1):
+		for pj in range(1, tw - 1):
+			if my_map_original[pi][pj] == 0:
+				res[pi][pj] = label_num + 2
 
-    # in edge list, we have label_num edges, made up by a list of coordinate pairs
-    edge_list = dict()
-    for l_i in range(label_num):
-        temp_list = props[l_i].coords
-        temp_pair = []
-        for point in temp_list:
-            for node_i in node_list:
-                if is_neighbour(point, node_i):
-                    if not (node_list.index(node_i) in temp_pair):
-                        temp_pair.append(node_list.index(node_i))
-                        temp_array = np.array([[node_i[0], node_i[1]]])
-                        temp_list = np.concatenate((temp_list, temp_array), axis=0)
+	# in edge list, we have label_num edges, made up by a list of coordinate pairs
+	edge_list = dict()
+	for l_i in range(label_num):
+		temp_list = props[l_i].coords
 
-        # if the edge does not link two different nodes
-        # then it must be a loop since it is detected as an edge
-        if len(temp_pair) == 1:
-            temp_pair.append(temp_pair[0])
+		ordered_list = []
+		swap_list = temp_list.tolist()
+		seq = list()
+		# get sequences that in each one of them the pixels are in order
+		for i in range(len(swap_list)-1):
+			if len(seq) == 0:
+				seq.append(swap_list[i])
+			if is_neighbour(swap_list[i], swap_list[i+1], neighbour_range=1):
+				seq.append(swap_list[i+1])
+				continue
+			else:
+				ordered_list.append(seq)
+				seq = list()
+				seq.append(swap_list[i+1])
+		ordered_list.append(seq)
 
-        edge_list[(temp_pair[0], temp_pair[1])] = temp_list
-        voronoi_graph.add_edge((temp_pair[0], temp_pair[1]), temp_list)
+		swap_list = list()
+		# following part concatentes the sequences in order
+		while ordered_list.__len__() > 0:
+			for item_i in xrange(len(ordered_list) - 1, -1, -1):
+				item = ordered_list[item_i]
+				if len(swap_list) == 0:
+					swap_list = item
+					del ordered_list[item_i]
+				else:
+					if is_neighbour(swap_list[0], item[0]):
+						swap_list = item[::-1] + swap_list
+						del ordered_list[item_i]
+					elif is_neighbour(swap_list[0], item[-1]):
+						swap_list = item + swap_list
+						del ordered_list[item_i]
+					elif is_neighbour(swap_list[-1], item[0]):
+						swap_list = swap_list + item
+						del ordered_list[item_i]
+					elif is_neighbour(swap_list[-1], item[-1]):
+						swap_list = swap_list + item[::-1]
+						del ordered_list[item_i]
+		temp_list = swap_list
+		temp_pair = [-1, -1]
+		# append the edges and node pair to the graph object
+		for node_i in range(len(node_list)):
+			if is_neighbour(temp_list[0], node_list[node_i]):
+				temp_pair[0] = node_i
+				temp_list.insert(0, list(node_list[node_i]))
+			elif is_neighbour(temp_list[-1], node_list[node_i]):
+				temp_pair[1] = node_i
+				temp_list.append(list(node_list[node_i]))
 
-    t_start = time.time()
-    """let's build a graph and find path now!"""
-    # path_found, node_index = voronoi_graph.a_star_path(1, 15)
-    # print node_index
+		# if the edge does not link two different nodes
+		# then it must be a loop since it is detected as an edge
+		if len(temp_pair) == 1:
+			temp_pair.append(temp_pair[0])
 
-    """let's try find path between any two point!"""
-    start_point = (10, 10)
-    end_point = (85, 10)
-    path2, pd2 = path_any_point(voronoi_graph, my_map_original, start_point, end_point)
-    
-    ax.text(start_point[1], start_point[0], 'S', color='red', fontsize=12)
-    ax.text(end_point[1], end_point[0], 'E', color='red', fontsize=12)
-    
-    """in pd2, the first and last element are just cutting point into some edge"""
-    if len(pd2) != 0:
-        print pd2
-        # cv2.imshow("label" + str(img_n), res)
+		edge_list[(temp_pair[0], temp_pair[1])] = temp_list
+		voronoi_graph.add_edge((temp_pair[0], temp_pair[1]), temp_list)
 
-        # test_nodes = np.array([[60, 60], [64, 59], [67, 55], [72, 55], [74, 52], [78, 53], [82, 56], [83, 60]],
-        #                      np.double)
-    plt.show()
-    plt.pause(60)
+	t_end = time.time()
+	print "time for graph making: " + str(t_end - t_start)
 
-    """
-    test_nodes = np.array([[60, 60], [64, 59], [68, 60], [73, 60], [76, 62], [78, 65], [79, 69], [79, 74]],
-    np.double)
+# ------------------------prepration work done-----------------------------
 
-    p_01 = mid_point(test_nodes[0], test_nodes[1])
-    p_12 = mid_point(test_nodes[1], test_nodes[2])
-    p_23 = mid_point(test_nodes[2], test_nodes[3])
-    p_34 = mid_point(test_nodes[3], test_nodes[4])
-    p_45 = mid_point(test_nodes[4], test_nodes[5])
-    p_56 = mid_point(test_nodes[5], test_nodes[6])
-    p_67 = mid_point(test_nodes[6], test_nodes[7])
-    
-    curve_1 = bezier.Curve(np.array([p_01, test_nodes[1], p_12], dtype=np.double), degree=3)
-    curve_2 = bezier.Curve(np.array([p_12, test_nodes[2], p_23], dtype=np.double), degree=3)
-    curve_3 = bezier.Curve(np.array([p_23, test_nodes[3], p_34], dtype=np.double), degree=3)
-    curve_4 = bezier.Curve(np.array([p_34, test_nodes[4], p_45], dtype=np.double), degree=3)
-    curve_5 = bezier.Curve(np.array([p_45, test_nodes[5], p_56, test_nodes[6], p_67], dtype=np.double), degree=5)
-    # curve_6 = bezier.Curve(np.array([p_56, test_nodes[6], p_67], dtype=np.double), degree=3)
-    
-    s_values = np.linspace(0.0, 1.0, 20)
-    
-    fit_1 = curve_1.evaluate_multi(s_values)
-    fit_2 = curve_2.evaluate_multi(s_values)
-    fit_3 = curve_3.evaluate_multi(s_values)
-    fit_4 = curve_4.evaluate_multi(s_values)
-    fit_5 = curve_5.evaluate_multi(s_values)
-    # fit_6 = curve_6.evaluate_multi(s_values)
-    
-    plt.plot(fit_1[:, 0], fit_1[:, 1], 'b--',  fit_2[:, 0], fit_2[:, 1], 'g--',
-    fit_3[:, 0], fit_3[:, 1], 'r--',  fit_4[:, 0], fit_4[:, 1], 'k--',
-    fit_5[:, 0], fit_5[:, 1], 'c--',
-    test_nodes[:,0], test_nodes[:,1], 'ro')
-    # fit_6[:, 0], fit_6[:, 1], 'm--',
-    """
+	pub = rospy.Publisher('guider', Float32MultiArray, queue_size=1)
+	rospy.init_node('path_planning', anonymous=True)
+	rate = rospy.Rate(5)
+	
+	"""let's try find path between any two point!"""
+	start_point = (80, 9)
+	end_point = (60, 80)
 
-    """spline interplotation"""
-    # sp1 = splrep(test_nodes[:, 0], test_nodes[:, 1], k=4)
-    # x_value = np.linspace(60, 83, 200)
-    # y_value = splev(x_value, sp1)
-    # plt.plot(x_value, y_value, 'b--', test_nodes[:,0], test_nodes[:,1])
+	ax.text(start_point[1], start_point[0], 'S', color='red', fontsize=12)
+	ax.text(end_point[1], end_point[0], 'E', color='red', fontsize=12)
 
-    """bezier python library"""
-    # b_curve = bezier.Curve(test_nodes.astype(dtype=np.double), degree=8)
+	path2, pd2 = path_any_point(voronoi_graph, my_map_original, start_point, end_point)
 
-    # s_values = np.linspace(0.0, 1.0, 20)
+	for pdi in range(len(path2)):
+	 	ax.text(path2[pdi][1], path2[pdi][0], str(pdi), color='white', fontsize=14)
 
-    # fit_value = b_curve.evaluate_multi(s_values)
+	plt.show()
+	plt.pause(10)
 
-    # plt.plot(fit_value[:, 0], fit_value[:, 1], 'b--', test_nodes[:,0], test_nodes[:,1], 'ro')
+	"""
+	path_msg = Float32MultiArray()
+	for waypoint in path2:
+		truepoint = pixeltotrue(waypoint[1], waypoint[0])
+		path_msg.data.append(truepoint[0])
+		path_msg.data.append(truepoint[1])
 
-    # fit the edge segment with polynomial is not good
-    """
-    poly_para = []
-    for key_i, list_i in edge_list.iteritems():
-        y = list_i[:, 0]
-        x = list_i[:, 1]
-        poly_temp = np.polyfit(list_i[:, 1], list_i[:, 0], )
-        poly_para.append(poly_temp)
-        poly = np.poly1d(poly_temp)
-        start_x = node_list[key_i[0]][1]
-        start_y = node_list[key_i[0]][0]
-        end_x = node_list[key_i[1]][1]
-        end_y = node_list[key_i[1]][0]
-    
-        xp = np.linspace(start_x, 0.1, end_x)
-        _ = plt.plot(x, y, '.', xp, poly(xp), '-')
-    """
+	while not rospy.is_shutdown():
+		pub.publish(path_msg)
+		print "message sent"
+		print path2
+		rate.sleep()
+	"""
+	
+	
+	"""in pd2, the first and last element are just cutting point into some edge"""
+	# if len(pd2) != 0:
+	# 	print pd2
 
-    # print thinning[20]
-    print(t_start - t_end)
+	# plt.show()
+	# plt.pause(60)
 
-cv2.waitKey(0)
+	# print thinning[20]
+	

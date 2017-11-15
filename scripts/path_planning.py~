@@ -10,9 +10,8 @@ from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 import time
 import math
-from scipy import weave
 # import bezier
-from scipy.interpolate import splev, splrep
+import multiprocessing
 
 
 class AStarNode:
@@ -195,8 +194,7 @@ def get_step(img, i, j, number):
     if b < 2 or b > 6:
         return False
 
-    a = int( (p2 and p3 == 0) + (p3 and p4 == 0) + (p4 and p5 == 0) + (p5 and p6 == 0) + (p6 and p7 == 0) + (p7 and p8 == 0) + (p8 and p9 == 0) + (p9 and p2 == 0) )
-
+    a = int((p2 and p3 == 0) + (p3 and p4 == 0) + (p4 and p5 == 0) + (p5 and p6 == 0) + (p6 and p7 == 0) + (p7 and p8 == 0) + (p8 and p9 == 0) + (p9 and p2 == 0))
     
     if a != 1:
         return False
@@ -211,7 +209,70 @@ def get_step(img, i, j, number):
             return True
 
     return False
-    
+
+
+def scanner_1(image, row_s, row_e):
+    t1 = []
+
+    # print "scan 1 " + str(row_s)
+    row, col = image.shape[:2]
+    for i in range(row_s, row_e):
+        for j in range(1, col - 1):
+            if image[i][j] == 0:
+                ans = False
+                p2 = int(image[i - 1][j])
+                p3 = int(image[i - 1][j + 1])
+                p4 = int(image[i][j + 1])
+                p5 = int(image[i + 1][j + 1])
+                p6 = int(image[i + 1][j])
+                p7 = int(image[i + 1][j - 1])
+                p8 = int(image[i][j - 1])
+                p9 = int(image[i - 1][j - 1])
+                b = int(8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9))
+                if 2 <= b <= 6:
+                    a = int(
+                        (p2 and p3 == 0) + (p3 and p4 == 0) + (p4 and p5 == 0) + (p5 and p6 == 0) + (p6 and p7 == 0) + (
+                        p7 and p8 == 0) + (p8 and p9 == 0) + (p9 and p2 == 0))
+                    if a == 1:
+                        if (p2 or p4 or p6) and (p4 or p6 or p8):
+                            ans = True
+                if ans:
+                    t1.append((i, j))
+
+    # print "t1 " + str(t1.__len__())
+    return t1
+
+
+def scanner_2(image, row_s, row_e):
+    t2 = []
+    # print "scan 2 " + str(row_s)
+    row, col = image.shape[:2]
+    for i in range(row_s, row_e):
+        for j in range(1, col - 1):
+            if image[i][j] == 0:
+                ans = False
+                p2 = int(image[i - 1][j])
+                p3 = int(image[i - 1][j + 1])
+                p4 = int(image[i][j + 1])
+                p5 = int(image[i + 1][j + 1])
+                p6 = int(image[i + 1][j])
+                p7 = int(image[i + 1][j - 1])
+                p8 = int(image[i][j - 1])
+                p9 = int(image[i - 1][j - 1])
+                b = int(8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9))
+                if 2 <= b <= 6:
+                    a = int(
+                        (p2 and p3 == 0) + (p3 and p4 == 0) + (p4 and p5 == 0) + (p5 and p6 == 0) + (p6 and p7 == 0) + (
+                        p7 and p8 == 0) + (p8 and p9 == 0) + (p9 and p2 == 0))
+                    if a == 1:
+                        if (p2 or p4 or p8) and (p2 or p6 or p8):
+                            ans = True
+                if ans:
+                    t2.append((i, j))
+
+    # print "t2 " + str(t2.__len__())
+    return t2
+
 
 def zs_thinning(img):
     """doing Zhang Suen thinning"""
@@ -223,117 +284,61 @@ def zs_thinning(img):
 
     image = cv2.bitwise_not(image)
 
-    # image = cv2.medianBlur(image, 3)
+    row, col = image.shape[:2]
+
+    image[:, :] = image[:, :] / 255
+
+    count = [0, 0]
+
+    row, col = image.shape[:2]
+
+    # create pools to run multiprocesses
+    pool1 = multiprocessing.Pool(processes=4)
+    pool2 = multiprocessing.Pool(processes=4)
+
+    row_pairs = [[1, row / 4], [row / 4, row / 2], [row / 2, 3 * row / 4], [3 * row / 4, row - 1]]
+
+    result1 = []
+    result2 = []
+    for i in range(4):
+        result1.append(pool1.apply_async(scanner_1, (image, row_pairs[i][0], row_pairs[i][1])))
 
     # plt.matshow(image, 5)
     # plt.show()
 
-    # print image[100]
-
-    # cv2.imshow("test", img)
-
-    row, col = image.shape[:2]
-
-    time_acc = 0.
-    time_acc_2 = 0.
-    
-    global acc_1
-    global acc_2
-    global acc_3
-    global acc_4
-	
-    image[:, :] = image[:, :] / 255
-    
-    a = b = p2 = p3 = p4 = p5 = p6 = p7 = p8 = p9 = int(1)
-
-    ans = False
-
     while True:
-        turn1 = []
-        turn2 = []
-        t_1 = time.time()
-        for i in range(1, row-1):
-            for j in range(1, col-1):
-                t_t = time.time()
-            	acc_4 += time.time() - t_1
-                if (image[i][j]==0):
-                    t_1 = time.time()
-                    ans = False
-                    p2 = int(image[i-1][j])
-                    p3 = int(image[i-1][j+1])
-                    p4 = int(image[i][j+1])
-                    p5 = int(image[i+1][j+1])
-                    p6 = int(image[i+1][j])
-                    p7 = int(image[i+1][j-1])
-                    p8 = int(image[i][j-1])
-                    p9 = int(image[i-1][j-1])
-                    b = int(8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9))
-                    acc_1 += time.time() - t_1
-                    
-                    if 2 <= b <= 6:
-                        t_1 = time.time()
-                        a = int( (p2 and p3 == 0) + (p3 and p4 == 0) + (p4 and p5 == 0) + (p5 and p6 == 0) + (p6 and p7 == 0) + (p7 and p8 == 0) + (p8 and p9 == 0) + (p9 and p2 == 0) )
-                        acc_2 += time.time() - t_1
-                        if a == 1:
-                            t_1 = time.time()
-                            if (p2 or p4 or p6) and (p4 or p6 or p8):
-                                ans = True
-                            acc_3 += time.time() - t_1
-                    if ans:              
-                          
-                        turn1.append((i, j))
-                        
-                t_1 = time.time()            
-                time_acc_2 += time.time()-t_t
-                    
-        for x, y in turn1:
+
+        for x, y in result1[0].get():
             image[x][y] = 1  # set condition1 satisfying pixel to white
+        for x, y in result1[1].get():
+            image[x][y] = 1
+        for x, y in result1[2].get():
+            image[x][y] = 1
+        for x, y in result1[3].get():
+            image[x][y] = 1
 
-        t_1 = time.time()
-        for i in range(1, row-1):
-            for j in range(1, col-1):
-                acc_4 += time.time() - t_1
-                t_t = time.time()
-                if (image[i][j]==0):
-                    t_1 = time.time()
-                    ans = False
-                    p2 = int(image[i-1][j])
-                    p3 = int(image[i-1][j+1])
-                    p4 = int(image[i][j+1])
-                    p5 = int(image[i+1][j+1])
-                    p6 = int(image[i+1][j])
-                    p7 = int(image[i+1][j-1])
-                    p8 = int(image[i][j-1])
-                    p9 = int(image[i-1][j-1])   
-                    b = 8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9)
-                    acc_1 += time.time() - t_1
-                    
-                    if 2 <= b <= 6:
-                        t_1 = time.time()
-                        
-                        a = int( (p2 and p3 == 0) + (p3 and p4 == 0) + (p4 and p5 == 0) + (p5 and p6 == 0) + (p6 and p7 == 0) + (p7 and p8 == 0) + (p8 and p9 == 0) + (p9 and p2 == 0) )
-                        acc_2 += time.time() - t_1
-                        if a == 1:
-                            t_1 = time.time()
-                            if (p2 or p4 or p8) and (p2 or p6 or p8):
-                                ans = True
-                            acc_3 += time.time() - t_1
-                    if ans:                    
-                        turn2.append((i, j)) 
-                        
-                t_1 = time.time() 
-                time_acc += time.time()-t_t
+        for i in range(4):
+            result2.append(pool2.apply_async(scanner_2, (image, row_pairs[i][0], row_pairs[i][1])))
 
-        for p, q in turn2:
-            image[p][q] = 1  # set condition satisfying pixel to white
+        for x, y in result2[0].get():
+            image[x][y] = 1  # set condition1 satisfying pixel to white
+        for x, y in result2[1].get():
+            image[x][y] = 1
+        for x, y in result2[2].get():
+            image[x][y] = 1
+        for x, y in result2[3].get():
+            image[x][y] = 1
 
-        # print " turn1 " + str(len(turn1)) + " turn2 " + str(len(turn2)) + " time 1 " + str(time_acc) + " time 2 " + str(time_acc_2)
-        # print " acc1 " + str(acc_1) + " acc2 " + str(acc_2) + " acc3 " + str(acc_3) + " acc4 " + str(acc_4)
-        plt.matshow(image, 5)
-        plt.show()
-        
-        if len(turn1) == 0 and len(turn2) == 0:
+        if (result1[0].get().__len__() + result1[1].get().__len__() + result1[2].get().__len__() + result1[
+            3].get().__len__()) == 0 and \
+                        (result2[0].get().__len__() + result2[1].get().__len__() + result2[2].get().__len__() + result2[
+                            3].get().__len__()) == 0:
             break
+        else:
+            result1 = []
+            result2 = []
+        for i in range(4):
+            result1.append(pool1.apply_async(scanner_1, (image, row_pairs[i][0], row_pairs[i][1])))
 
     return image
 
@@ -468,35 +473,32 @@ if __name__ == "__main__":
     # get an image representing the obstacles and walls
     img_list = ["maze2.png", "maze2_more.png", "maze2_less.png"]
     img_path = "/home/ras16/catkin_ws/src/path_planning/scripts/"
-    
-    for img_n in range(1):
 
+    for img_n in range(1):
+        t_start = time.time()
         original = cv2.imread(img_path + img_list[img_n])
 
         height, width = original.shape[:2]
 
         # resize the image to get lower resolution
         # this makes computational cost decrease much
-        original = cv2.resize(original, (int(0.3*width), int(0.3*height)), interpolation=cv2.INTER_CUBIC)
-        print "image height" + str(int(0.3*height)) + "image width" + str(int(0.3*width))
+        original = cv2.resize(original, (int(0.3 * width), int(0.3 * height)), interpolation=cv2.INTER_CUBIC)
+        print "image height" + str(int(0.3 * height)) + "image width" + str(int(0.3 * width))
 
         gray = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
-
         # use only binary map
         # with probabilistic occupancy, the threshold of this should be set carefully
         ret3, my_map_original = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        acc_1 = 0.
-        acc_2 = 0.
-        acc_3 = 0.
-        acc_4 = 0.
+        t_end = time.time()
+        print "time for preparation: " + str(t_end - t_start)
 
         t_start = time.time()
         # do erosion first, and do thinning
         # this Zhang Suen thinning guarantees that skeleton will not be cut at any point
         thinning = zs_thinning(my_map_original)
         t_end = time.time()
-        print (t_end-t_start)
+        print "time for thinning: " + str(t_end - t_start)
 
         joint_count = 0
 
@@ -504,189 +506,188 @@ if __name__ == "__main__":
 
         # find the joint node of branching point
         th, tw = thinning.shape[:2]
-        for pi in range(1, th-1):
-            for pj in range(1, tw-1):
-                if thinning[pi][pj] == 0:
-                    p2 = thinning[pi - 1][pj]
-                    p3 = thinning[pi - 1][pj + 1]
-                    p4 = thinning[pi][pj + 1]
-                    p5 = thinning[pi + 1][pj + 1]
-                    p6 = thinning[pi + 1][pj]
-                    p7 = thinning[pi + 1][pj - 1]
-                    p8 = thinning[pi][pj - 1]
-                    p9 = thinning[pi - 1][pj - 1]
+    for pi in range(1, th - 1):
+        for pj in range(1, tw - 1):
+            if thinning[pi][pj] == 0:
+                p2 = thinning[pi - 1][pj]
+                p3 = thinning[pi - 1][pj + 1]
+                p4 = thinning[pi][pj + 1]
+                p5 = thinning[pi + 1][pj + 1]
+                p6 = thinning[pi + 1][pj]
+                p7 = thinning[pi + 1][pj - 1]
+                p8 = thinning[pi][pj - 1]
+                p9 = thinning[pi - 1][pj - 1]
 
-                    black_n = (8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9))
+                black_n = (8 - (p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9))
 
-                    if 1 < black_n < 3 or black_n > 5:
-                        continue
+                if 1 < black_n < 3 or black_n > 5:
+                    continue
 
-                    if (white_to_black(p2, p3) + white_to_black(p3, p4) +
-                            white_to_black(p4, p5) + white_to_black(p5, p6) +
-                            white_to_black(p6, p7) + white_to_black(p7, p8) +
-                            white_to_black(p8, p9) + white_to_black(p9, p2) >= 3):
-                        joint_count = joint_count + 1
-                        thinning[pi][pj] = 150
-                        node_list.append((pi, pj))
+                if (white_to_black(p2, p3) + white_to_black(p3, p4) +
+                        white_to_black(p4, p5) + white_to_black(p5, p6) +
+                        white_to_black(p6, p7) + white_to_black(p7, p8) +
+                        white_to_black(p8, p9) + white_to_black(p9, p2) >= 3):
+                    joint_count = joint_count + 1
+                    thinning[pi][pj] = 150
+                    node_list.append((pi, pj))
 
-                    if black_n == 1:
-                        thinning[pi][pj] = 150
-                        joint_count = joint_count + 1
-                        node_list.append((pi, pj))
+                if black_n == 1:
+                    thinning[pi][pj] = 150
+                    joint_count = joint_count + 1
+                    node_list.append((pi, pj))
 
-        voronoi_graph = RoadGraph(node_list)
+    voronoi_graph = RoadGraph(node_list)  # print joint_count
+    # print node_list
 
-        # print joint_count
-        # print node_list
+    # to show the node with a larger square dot
+    # in labelling of connected components,
+    # it is also used as edge cutting
+    for pi, pj in node_list:
+        for ia in range(-1, 2):
+            for ja in range(-1, 2):
+                thinning[pi + ia][pj + ja] = 1
 
-        # to show the node with a larger square dot
-        # in labelling of connected components,
-        # it is also used as edge cutting
-        for pi, pj in node_list:
-            for ia in range(-1, 2):
-                for ja in range(-1, 2):
-                    thinning[pi + ia][pj + ja] = 1
+    # to label all the connected component
+    res, label_num = label(thinning, neighbors=8, background=1, return_num=True)
+    res = res + 1
+    # print res
+    props = regionprops(res)
 
-        # to label all the connected component
-        res, label_num = label(thinning, neighbors=8, background=1, return_num=True)
-        res = res + 1
-        # print res
-        props = regionprops(res)
-        
-        print "label number " + str(label_num) + "  " + str(len(props))
-        
-        # plt.matshow(res, img_n)
-        # plt.show()
-        # plt.pause(10)
+    print "label number " + str(label_num) + "  " + str(len(props))
 
-        # to show the walls in original map which is removed from the map
-        for pi in range(1, th-1):
-            for pj in range(1, tw-1):
-                if my_map_original[pi][pj] == 0:
-                    res[pi][pj] = label_num + 2
+    # plt.matshow(res, img_n)
+    # plt.show()
+    # plt.pause(10)
 
-        # in edge list, we have label_num edges, made up by a list of coordinate pairs
-        edge_list = dict()
-        for l_i in range(label_num):
-            temp_list = props[l_i].coords
-            temp_pair = []
-            for point in temp_list:
-                for node_i in node_list:
-                    if is_neighbour(point, node_i):
-                        if not (node_list.index(node_i) in temp_pair):
-                            temp_pair.append(node_list.index(node_i))
-                            temp_array = np.array([[node_i[0], node_i[1]]])
-                            temp_list = np.concatenate((temp_list, temp_array), axis=0)
+    # to show the walls in original map which is removed from the map
+    for pi in range(1, th - 1):
+        for pj in range(1, tw - 1):
+            if my_map_original[pi][pj] == 0:
+                res[pi][pj] = label_num + 2
 
-            # if the edge does not link two different nodes
-            # then it must be a loop since it is detected as an edge
-            if len(temp_pair) == 1:
-                temp_pair.append(temp_pair[0])
-                
-            edge_list[(temp_pair[0], temp_pair[1])] = temp_list
-            voronoi_graph.add_edge((temp_pair[0], temp_pair[1]), temp_list)
+    # in edge list, we have label_num edges, made up by a list of coordinate pairs
+    edge_list = dict()
+    for l_i in range(label_num):
+        temp_list = props[l_i].coords
+        temp_pair = []
+        for point in temp_list:
+            for node_i in node_list:
+                if is_neighbour(point, node_i):
+                    if not (node_list.index(node_i) in temp_pair):
+                        temp_pair.append(node_list.index(node_i))
+                        temp_array = np.array([[node_i[0], node_i[1]]])
+                        temp_list = np.concatenate((temp_list, temp_array), axis=0)
 
-        t_start = time.time()
-        """let's build a graph and find path now!"""
-        # path_found, node_index = voronoi_graph.a_star_path(1, 15)
-        # print node_index
+        # if the edge does not link two different nodes
+        # then it must be a loop since it is detected as an edge
+        if len(temp_pair) == 1:
+            temp_pair.append(temp_pair[0])
 
-        """let's try find path between any two point!"""
-        path2, pd2 = path_any_point(voronoi_graph, my_map_original, (10, 10), (85, 10))
-        """in pd2, the first and last element are just cutting point into some edge"""
-        if len(pd2) != 0:
-            print pd2
+        edge_list[(temp_pair[0], temp_pair[1])] = temp_list
+        voronoi_graph.add_edge((temp_pair[0], temp_pair[1]), temp_list)
+
+    t_start = time.time()
+    """let's build a graph and find path now!"""
+    # path_found, node_index = voronoi_graph.a_star_path(1, 15)
+    # print node_index
+
+    """let's try find path between any two point!"""
+    path2, pd2 = path_any_point(voronoi_graph, my_map_original, (10, 10), (85, 10))
+    """in pd2, the first and last element are just cutting point into some edge"""
+    if len(pd2) != 0:
+        print pd2
         # cv2.imshow("label" + str(img_n), res)
 
         # test_nodes = np.array([[60, 60], [64, 59], [67, 55], [72, 55], [74, 52], [78, 53], [82, 56], [83, 60]],
         #                      np.double)
 
-        test_nodes = np.array([[60, 60], [64, 59], [68, 60], [73, 60], [76, 62], [78, 65], [79, 69], [79, 74]],
-                              np.double)
+    """
+    test_nodes = np.array([[60, 60], [64, 59], [68, 60], [73, 60], [76, 62], [78, 65], [79, 69], [79, 74]],
+    np.double)
 
-        """
-        p_01 = mid_point(test_nodes[0], test_nodes[1])
-        p_12 = mid_point(test_nodes[1], test_nodes[2])
-        p_23 = mid_point(test_nodes[2], test_nodes[3])
-        p_34 = mid_point(test_nodes[3], test_nodes[4])
-        p_45 = mid_point(test_nodes[4], test_nodes[5])
-        p_56 = mid_point(test_nodes[5], test_nodes[6])
-        p_67 = mid_point(test_nodes[6], test_nodes[7])
+    p_01 = mid_point(test_nodes[0], test_nodes[1])
+    p_12 = mid_point(test_nodes[1], test_nodes[2])
+    p_23 = mid_point(test_nodes[2], test_nodes[3])
+    p_34 = mid_point(test_nodes[3], test_nodes[4])
+    p_45 = mid_point(test_nodes[4], test_nodes[5])
+    p_56 = mid_point(test_nodes[5], test_nodes[6])
+    p_67 = mid_point(test_nodes[6], test_nodes[7])
+    
+    curve_1 = bezier.Curve(np.array([p_01, test_nodes[1], p_12], dtype=np.double), degree=3)
+    curve_2 = bezier.Curve(np.array([p_12, test_nodes[2], p_23], dtype=np.double), degree=3)
+    curve_3 = bezier.Curve(np.array([p_23, test_nodes[3], p_34], dtype=np.double), degree=3)
+    curve_4 = bezier.Curve(np.array([p_34, test_nodes[4], p_45], dtype=np.double), degree=3)
+    curve_5 = bezier.Curve(np.array([p_45, test_nodes[5], p_56, test_nodes[6], p_67], dtype=np.double), degree=5)
+    # curve_6 = bezier.Curve(np.array([p_56, test_nodes[6], p_67], dtype=np.double), degree=3)
+    
+    s_values = np.linspace(0.0, 1.0, 20)
+    
+    fit_1 = curve_1.evaluate_multi(s_values)
+    fit_2 = curve_2.evaluate_multi(s_values)
+    fit_3 = curve_3.evaluate_multi(s_values)
+    fit_4 = curve_4.evaluate_multi(s_values)
+    fit_5 = curve_5.evaluate_multi(s_values)
+    # fit_6 = curve_6.evaluate_multi(s_values)
+    
+    plt.plot(fit_1[:, 0], fit_1[:, 1], 'b--',  fit_2[:, 0], fit_2[:, 1], 'g--',
+    fit_3[:, 0], fit_3[:, 1], 'r--',  fit_4[:, 0], fit_4[:, 1], 'k--',
+    fit_5[:, 0], fit_5[:, 1], 'c--',
+    test_nodes[:,0], test_nodes[:,1], 'ro')
+    # fit_6[:, 0], fit_6[:, 1], 'm--',
+    """
 
-        curve_1 = bezier.Curve(np.array([p_01, test_nodes[1], p_12], dtype=np.double), degree=3)
-        curve_2 = bezier.Curve(np.array([p_12, test_nodes[2], p_23], dtype=np.double), degree=3)
-        curve_3 = bezier.Curve(np.array([p_23, test_nodes[3], p_34], dtype=np.double), degree=3)
-        curve_4 = bezier.Curve(np.array([p_34, test_nodes[4], p_45], dtype=np.double), degree=3)
-        curve_5 = bezier.Curve(np.array([p_45, test_nodes[5], p_56, test_nodes[6], p_67], dtype=np.double), degree=5)
-        # curve_6 = bezier.Curve(np.array([p_56, test_nodes[6], p_67], dtype=np.double), degree=3)
+    """spline interplotation"""
+    # sp1 = splrep(test_nodes[:, 0], test_nodes[:, 1], k=4)
+    # x_value = np.linspace(60, 83, 200)
+    # y_value = splev(x_value, sp1)
+    # plt.plot(x_value, y_value, 'b--', test_nodes[:,0], test_nodes[:,1])
 
-        s_values = np.linspace(0.0, 1.0, 20)
+    """bezier python library"""
+    # b_curve = bezier.Curve(test_nodes.astype(dtype=np.double), degree=8)
 
-        fit_1 = curve_1.evaluate_multi(s_values)
-        fit_2 = curve_2.evaluate_multi(s_values)
-        fit_3 = curve_3.evaluate_multi(s_values)
-        fit_4 = curve_4.evaluate_multi(s_values)
-        fit_5 = curve_5.evaluate_multi(s_values)
-        # fit_6 = curve_6.evaluate_multi(s_values)
+    # s_values = np.linspace(0.0, 1.0, 20)
 
-        plt.plot(fit_1[:, 0], fit_1[:, 1], 'b--',  fit_2[:, 0], fit_2[:, 1], 'g--',
-                 fit_3[:, 0], fit_3[:, 1], 'r--',  fit_4[:, 0], fit_4[:, 1], 'k--',
-                 fit_5[:, 0], fit_5[:, 1], 'c--',
-                 test_nodes[:,0], test_nodes[:,1], 'ro')
-        # fit_6[:, 0], fit_6[:, 1], 'm--',
-        """
+    # fit_value = b_curve.evaluate_multi(s_values)
 
-        """spline interplotation"""
-        # sp1 = splrep(test_nodes[:, 0], test_nodes[:, 1], k=4)
-        # x_value = np.linspace(60, 83, 200)
-        # y_value = splev(x_value, sp1)
-        # plt.plot(x_value, y_value, 'b--', test_nodes[:,0], test_nodes[:,1])
+    # plt.plot(fit_value[:, 0], fit_value[:, 1], 'b--', test_nodes[:,0], test_nodes[:,1], 'ro')
 
-        """bezier python library"""
-        # b_curve = bezier.Curve(test_nodes.astype(dtype=np.double), degree=8)
+    # fit the edge segment with polynomial is not good
+    """
+    poly_para = []
+    for key_i, list_i in edge_list.iteritems():
+        y = list_i[:, 0]
+        x = list_i[:, 1]
+        poly_temp = np.polyfit(list_i[:, 1], list_i[:, 0], )
+        poly_para.append(poly_temp)
+        poly = np.poly1d(poly_temp)
+        start_x = node_list[key_i[0]][1]
+        start_y = node_list[key_i[0]][0]
+        end_x = node_list[key_i[1]][1]
+        end_y = node_list[key_i[1]][0]
+    
+        xp = np.linspace(start_x, 0.1, end_x)
+        _ = plt.plot(x, y, '.', xp, poly(xp), '-')
+    """
 
-        # s_values = np.linspace(0.0, 1.0, 20)
+    # thinning = cv2.imread('thinning.png')
+    # thinning = cv2.cvtColor(thinning, cv2.COLOR_RGB2GRAY)
+    # ret3, thinning = cv2.threshold(thinning, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        # fit_value = b_curve.evaluate_multi(s_values)
+    # cv2.imwrite('thinning' + str(img_n) + '.png', thinning)
 
-        # plt.plot(fit_value[:, 0], fit_value[:, 1], 'b--', test_nodes[:,0], test_nodes[:,1], 'ro')
+    # cv2.imshow("original", my_map)
+    # cv2.imshow("thinning", thinning)
 
-        # fit the edge segment with polynomial is not good
-        """
-        poly_para = []
-        for key_i, list_i in edge_list.iteritems():
-            y = list_i[:, 0]
-            x = list_i[:, 1]
-            poly_temp = np.polyfit(list_i[:, 1], list_i[:, 0], )
-            poly_para.append(poly_temp)
-            poly = np.poly1d(poly_temp)
-            start_x = node_list[key_i[0]][1]
-            start_y = node_list[key_i[0]][0]
-            end_x = node_list[key_i[1]][1]
-            end_y = node_list[key_i[1]][0]
+    # print thinning.shape[:2]
+    # print my_map.shape[:2]
 
-            xp = np.linspace(start_x, 0.1, end_x)
-            _ = plt.plot(x, y, '.', xp, poly(xp), '-')
-        """
+    # test = cv2.bitwise_and(original, original, mask=thinning)
+    # cv2.imshow("eroded" + str(img_n), my_map)
+    # cv2.imshow("test" + str(img_n), test)
 
-        # thinning = cv2.imread('thinning.png')
-        # thinning = cv2.cvtColor(thinning, cv2.COLOR_RGB2GRAY)
-        # ret3, thinning = cv2.threshold(thinning, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # cv2.imwrite('result' + str(img_n) + '.png', test)
 
-        # cv2.imwrite('thinning' + str(img_n) + '.png', thinning)
+    # print thinning[20]
+    print(t_start - t_end)
 
-        # cv2.imshow("original", my_map)
-        # cv2.imshow("thinning", thinning)
-
-        # print thinning.shape[:2]
-        # print my_map.shape[:2]
-
-        # test = cv2.bitwise_and(original, original, mask=thinning)
-        # cv2.imshow("eroded" + str(img_n), my_map)
-        # cv2.imshow("test" + str(img_n), test)
-
-        # cv2.imwrite('result' + str(img_n) + '.png', test)
-
-        # print thinning[20]
-	print(t_start - t_end)
-    cv2.waitKey(0)
+cv2.waitKey(0)
