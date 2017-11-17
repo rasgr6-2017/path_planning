@@ -111,7 +111,7 @@ class RoadGraph:
         for con in self.connection:
             if con == tuple([node_1, node_2]) or con == tuple([node_2, node_1]):
                 print "Warning: directly connected nodes!"
-                return self.get_edge(con), con
+                return (node_1, node_2)
 
         closed_node = list()
 
@@ -166,10 +166,8 @@ class RoadGraph:
             closed_node.append(node_q)
 
     def get_path(self, closed_nodes, node_q, node_end):
-        path_edges = list()
         path_index = list()
         pair_temp = (node_q.index, node_end.index)
-        path_edges.append(self.get_edge(pair_temp))
         path_index.append(pair_temp)
 
         current_node = node_q
@@ -177,13 +175,12 @@ class RoadGraph:
             for node_left in closed_nodes:
                 if node_left.index == current_node.parent:
                     pair_temp = (node_left.index, current_node.index)
-                    path_edges.insert(0, self.get_edge(pair_temp))
                     path_index.insert(0, pair_temp)
                     current_node = node_left
                     break
-        return path_edges, path_index
+        return path_index
 
-    def pixel_path(self, p1, p_2, ps=None, pe=None, interval=16):
+    def pixel_path(self, p1, p_2, ps=None, pe=None, interval=11):
         """p1, p_2 are connected nodes in the order you want to go; p are optional point where you are"""
         if ps is None:
             ps = self.nodes[p1]
@@ -344,16 +341,16 @@ def zs_thinning(img):
     image = img.copy()
 
     # this to a degree can represent the expansion of walls and obstacles
-    kernel1 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    image = cv2.erode(image, kernel1, iterations=3)
+    kernel1 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    image = cv2.erode(image, kernel1, iterations=5)
 
     image = cv2.bitwise_not(image)
 
     row, col = image.shape[:2]
     
-    # plt.matshow(image, 1)
-    # plt.show()
-    # plt.pause(60)
+    plt.matshow(image, 1)
+    plt.show()
+    plt.pause(60)
 
     image[:, :] = image[:, :] / 255
 
@@ -440,7 +437,7 @@ def pixeltotrue(pi, pj):
 	x_max = 120.
 	y_max = 120.
 	
-	return [ (2.4/x_max)*(x_max - 1 - pj) - 0.44, -(2.4/y_max) * pi + 0.2 ]
+	return [(2.4/y_max) * pi, (2.4/x_max)*(x_max - 1 - pj)]
 
 
 class PathPlanner:
@@ -520,10 +517,12 @@ class PathPlanner:
 
 		num_n = 0
 		# show the ndoe with their number in node_list
+		
+		
 		for n_i, n_j in node_list:
 			ax.text(n_j, n_i, str(num_n), color='red', fontsize=12)
 			num_n += 1
-
+		
 		# to show the walls in original map which is removed from the map
 		for pi in range(1, th - 1):
 			for pj in range(1, tw - 1):
@@ -642,6 +641,8 @@ class PathPlanner:
 		# for point_2
 		node_21 = road_graph.connection[index_2[0]][0]
 		node_22 = road_graph.connection[index_2[0]][1]
+		
+		print node_11, node_12, node_21, node_22
 
 		i_1 = index_1[0]
 		j_1 = index_1[1]
@@ -651,12 +652,32 @@ class PathPlanner:
 		if (node_11 == node_21 and node_12 == node_22) or (node_11 == node_22 and node_12 == node_21):
 			path_seg = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1], pe=road_graph.edge_list[i_2][j_2])
 			return path_seg, [(node_12, node_11)]
+		elif node_11 == node_21:
+			path_seg1 = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
+			path_seg2 = road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
+			path_seg = path_seg1 + path_seg2
+			return path_seg, [(node_12, node_11), (node_21, node_22)]
+		elif node_11 == node_22:
+			path_seg1 = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
+			path_seg2 = road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
+			path_seg = path_seg1 + path_seg2
+			return path_seg, [(node_12, node_11), (node_22, node_21)]
+		elif node_12 == node_21:
+			path_seg1 = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
+			path_seg2 = road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
+			path_seg = path_seg1 + path_seg2
+			return path_seg, [(node_11, node_12), (node_21, node_22)]
+		elif node_12 == node_22:
+			path_seg1 = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
+			path_seg2 = road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
+			path_seg = path_seg1 + path_seg2
+			return path_seg, [(node_11, node_12), (node_22, node_21)]
 
 		# can be optimized, not all path needs to be stored and transferred
-		path_1, ind1 = road_graph.a_star_path(node_11, node_21)
-		path_2, ind2 = road_graph.a_star_path(node_11, node_22)
-		path_3, ind3 = road_graph.a_star_path(node_12, node_21)
-		path_4, ind4 = road_graph.a_star_path(node_12, node_22)
+		ind1 = road_graph.a_star_path(node_11, node_21)
+		ind2 = road_graph.a_star_path(node_11, node_22)
+		ind3 = road_graph.a_star_path(node_12, node_21)
+		ind4 = road_graph.a_star_path(node_12, node_22)
 
 		if isinstance(ind1, tuple):
 			ind1 = [ind1]
@@ -675,6 +696,10 @@ class PathPlanner:
 			 abs(index_2[1] - road_graph.edge_list[index_2[0]].index(list(road_graph.nodes[node_21])))
 		l4 = abs(index_1[1] - road_graph.edge_list[index_1[0]].index(list(road_graph.nodes[node_12]))) + \
 			 abs(index_2[1] - road_graph.edge_list[index_2[0]].index(list(road_graph.nodes[node_22])))
+
+		print i_1, j_1, i_2, j_2
+		print ind1, ind2, ind3, ind4
+		print l1, l2, l3, l4
 
 		for it in ind1:
 			l1 = l1 + road_graph.get_length(it)
@@ -716,11 +741,13 @@ def targetCallback(msg):
 	global end_point
 	global new_target_flag
 	
-	start_point = (msg.points[0].x, msg.points[0].y)
-	end_point = (msg.points[1].x, msg.points[1].y)
-	print("target changed!")
-	
-	new_target_flag = True
+	start_t = (msg.points[0].x, msg.points[0].y)
+	end_t = (msg.points[1].x, msg.points[1].y)
+	if start_t != start_point or end_t != end_point:
+		start_point = start_t
+		end_point = end_t
+		print("target changed! " + str(start_point) + "   " + str(end_point) )
+		new_target_flag = True
 	
 
 if __name__ == "__main__":
@@ -756,17 +783,25 @@ if __name__ == "__main__":
 	rate = rospy.Rate(2)
 	
 	"""let's try find path between any two point!"""
-	start_point = (80, 9)
-	end_point = (60, 80)
+	start_point = (90, 9)
+	end_point = (17, 84)
 
 	ax.text(start_point[1], start_point[0], 'S', color='red', fontsize=12)
 	ax.text(end_point[1], end_point[0], 'E', color='red', fontsize=12)
 
 	path2, pd2 = planner_1.path_any_point(start_point, end_point)
 
-	for pdi in range(1, len(path2)):
-	 	ax.text(path2[pdi][1], path2[pdi][0], str(pdi), color='white', fontsize=14)
-
+	# print pd2
+	pdi = 0
+	while( pdi < len(path2) - 1 ):
+		if diagonal_distance(path2[pdi], path2[pdi+1]) <= 5:
+			del path2[pdi+1]
+		else:
+			pdi += 1
+	
+	for pdi in range(0, len(path2)):
+	 	ax.text(path2[pdi][1]+2, path2[pdi][0]+2, str(pdi), color='white', fontsize=14)
+	
 	path_msg = Float32MultiArray()
 	for pdi in range(1, len(path2)):
 		truepoint = pixeltotrue(path2[pdi][1], path2[pdi][0])
@@ -774,35 +809,32 @@ if __name__ == "__main__":
 		path_msg.data.append(truepoint[1])
 	path_msg.data.append(0)
 
-	# plt.show()
-	# plt.pause(10)
+	plt.show()
+	plt.pause(10)
 	
+	"""
 	new_target_flag = False
 	count = 1
+	command_num = 1
 	while not rospy.is_shutdown():
 		if new_target_flag:
 			path2, pd2 = planner_1.path_any_point(start_point, end_point)
-			for pdi in range(1, len(path2)):
-				ax.text(path2[pdi][1], path2[pdi][0], str(pdi), color='white', fontsize=14)
+			# for pdi in range(1, len(path2)):
+			# 	ax.text(path2[pdi][1], path2[pdi][0], str(pdi), color='white', fontsize=14)
 			path_msg = Float32MultiArray()
 			for pdi in range(1, len(path2)):
 				truepoint = pixeltotrue(path2[pdi][1], path2[pdi][0])
 				path_msg.data.append(truepoint[0])
 				path_msg.data.append(truepoint[1])
-			path_msg.data.append(0)
+			path_msg.data.append(command_num)
+			command_num += 1
 		pub.publish(path_msg)
 		new_target_flag = False
 		print "message sent " + str(count)
 		count += 1
 		print path_msg.data
 		rate.sleep()
+	"""
 	
-	"""in pd2, the first and last element are just cutting point into some edge"""
-	# if len(pd2) != 0:
-	# 	print pd2
 
-	# plt.show()
-	# plt.pause(60)
-
-	# print thinning[20]
 	
