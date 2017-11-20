@@ -348,9 +348,10 @@ def zs_thinning(img):
 
     row, col = image.shape[:2]
     
-    plt.matshow(image, 1)
-    plt.show()
-    plt.pause(60)
+    # plt.matshow(image, 1)
+    # plt.matshow(img, 2)
+    # plt.show()
+    # plt.pause(60)
 
     image[:, :] = image[:, :] / 255
 
@@ -603,8 +604,8 @@ class PathPlanner:
 		temp_map = self.global_map.copy()
 
 		# this to a degree can represent the expansion of walls and obstacles
-		kernel1 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
-		temp_map = cv2.erode(temp_map, kernel1, iterations=2)
+		kernel1 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+		temp_map = cv2.erode(temp_map, kernel1, iterations=5)
 
 		# plt.matshow(temp_map)
 		# plt.show()
