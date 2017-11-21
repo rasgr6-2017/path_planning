@@ -107,6 +107,7 @@ class RoadGraph:
 
         if node_1 == node_2:
             print "Warning: two nodes are the same!"
+            return (0, 0)
 
         for con in self.connection:
             if con == tuple([node_1, node_2]) or con == tuple([node_2, node_1]):
@@ -519,7 +520,6 @@ class PathPlanner:
 		num_n = 0
 		# show the ndoe with their number in node_list
 		
-		
 		for n_i, n_j in node_list:
 			ax.text(n_j, n_i, str(num_n), color='red', fontsize=12)
 			num_n += 1
@@ -574,12 +574,18 @@ class PathPlanner:
 							del ordered_list[item_i]
 			temp_list = swap_list
 			temp_pair = [-1, -1]
+			if len(temp_list) < 10:
+				continue
 			# append the edges and node pair to the graph object
 			for node_i in range(len(node_list)):
-				if is_neighbour(temp_list[0], node_list[node_i]):
+				if is_neighbour(temp_list[0], node_list[node_i]) or \
+				is_neighbour(temp_list[1], node_list[node_i]) or \
+				is_neighbour(temp_list[2], node_list[node_i]):
 					temp_pair[0] = node_i
 					temp_list.insert(0, list(node_list[node_i]))
-				elif is_neighbour(temp_list[-1], node_list[node_i]):
+				elif is_neighbour(temp_list[-1], node_list[node_i]) or \
+				is_neighbour(temp_list[-2], node_list[node_i]) or \
+				is_neighbour(temp_list[-3], node_list[node_i]):
 					temp_pair[1] = node_i
 					temp_list.append(list(node_list[node_i]))
 
@@ -653,6 +659,7 @@ class PathPlanner:
 		if (node_11 == node_21 and node_12 == node_22) or (node_11 == node_22 and node_12 == node_21):
 			path_seg = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1], pe=road_graph.edge_list[i_2][j_2])
 			return path_seg, [(node_12, node_11)]
+		"""
 		elif node_11 == node_21:
 			path_seg1 = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
 			path_seg2 = road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
@@ -673,6 +680,7 @@ class PathPlanner:
 			path_seg2 = road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
 			path_seg = path_seg1 + path_seg2
 			return path_seg, [(node_11, node_12), (node_22, node_21)]
+			"""
 
 		# can be optimized, not all path needs to be stored and transferred
 		ind1 = road_graph.a_star_path(node_11, node_21)
@@ -703,36 +711,48 @@ class PathPlanner:
 		print l1, l2, l3, l4
 
 		for it in ind1:
-			l1 = l1 + road_graph.get_length(it)
+			if not it == (0, 0):
+				l1 = l1 + road_graph.get_length(it)
+				print road_graph.get_length(it)
 		for it in ind2:
-			l2 = l2 + road_graph.get_length(it)
+			if not it == (0, 0):
+				l2 = l2 + road_graph.get_length(it)
+				print road_graph.get_length(it)
 		for it in ind3:
-			l3 = l3 + road_graph.get_length(it)
+			if not it == (0, 0):
+				l3 = l3 + road_graph.get_length(it)
+				print road_graph.get_length(it)
 		for it in ind4:
-			l4 = l4 + road_graph.get_length(it)
+			if not it == (0, 0):
+				l4 = l4 + road_graph.get_length(it)
+				print road_graph.get_length(it)
 
 		if l1 < l2 and l1 < l3 and l1 < l4:
 			path_seg = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
 			for it in ind1:
-				path_seg += road_graph.pixel_path(it[0], it[1])
+				if not it == (0, 0):
+					path_seg += road_graph.pixel_path(it[0], it[1])
 			path_seg += road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
 			return path_seg, ind1
 		elif l2 < l1 and l2 < l3 and l2 < l4:
 			path_seg = road_graph.pixel_path(node_12, node_11, ps=road_graph.edge_list[i_1][j_1])
 			for it in ind2:
-				path_seg += road_graph.pixel_path(it[0], it[1])
+				if not it == (0, 0):
+					path_seg += road_graph.pixel_path(it[0], it[1])
 			path_seg += road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
 			return path_seg, ind2
 		elif l3 < l1 and l3 < l2 and l3 < l4:
 			path_seg = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
 			for it in ind3:
-				path_seg += road_graph.pixel_path(it[0], it[1])
+				if not it == (0, 0):
+					path_seg += road_graph.pixel_path(it[0], it[1])
 			path_seg += road_graph.pixel_path(node_21, node_22, pe=road_graph.edge_list[i_2][j_2])
 			return path_seg, ind3
 		else:
 			path_seg = road_graph.pixel_path(node_11, node_12, ps=road_graph.edge_list[i_1][j_1])
 			for it in ind4:
-				path_seg += road_graph.pixel_path(it[0], it[1])
+				if not it == (0, 0):
+					path_seg += road_graph.pixel_path(it[0], it[1])
 			path_seg += road_graph.pixel_path(node_22, node_21, pe=road_graph.edge_list[i_2][j_2])
 			return path_seg, ind4
 
@@ -785,7 +805,7 @@ if __name__ == "__main__":
 	
 	"""let's try find path between any two point!"""
 	start_point = (90, 9)
-	end_point = (17, 84)
+	end_point = (12, 94)
 
 	ax.text(start_point[1], start_point[0], 'S', color='red', fontsize=12)
 	ax.text(end_point[1], end_point[0], 'E', color='red', fontsize=12)
@@ -811,7 +831,7 @@ if __name__ == "__main__":
 	path_msg.data.append(0)
 
 	plt.show()
-	plt.pause(10)
+	plt.pause(1)
 	
 	"""
 	new_target_flag = False
