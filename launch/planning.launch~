@@ -1,0 +1,5 @@
+<launch>
+  	<node name="path_planning" output="screen" pkg="path_planning" type="path_planning.py"/>
+	<param name="planner_status" type="int" value="3" />
+	<param name="is_explore" type="bool" value="False" />
+</launch>

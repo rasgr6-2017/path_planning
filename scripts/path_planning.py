@@ -5,6 +5,7 @@ import rospy
 from std_msgs.msg import Float32MultiArray
 from geometry_msgs.msg import Polygon
 from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import Image
 import numpy as np
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
@@ -14,6 +15,7 @@ import matplotlib.pyplot as plt
 import time
 import math
 import multiprocessing
+from random import randint
 
 
 class FindAllCycles:
@@ -478,33 +480,27 @@ def mid_point(a1, a2):
         b[i] = (a1[i] + a2[i]) / 2.0
     return b
 
-
-def pixeltotrue(pi, pj):
-    x_max = 120.
-    y_max = 120.
-
-    return [(2.4 / y_max) * pi, (2.4 / x_max) * (x_max - 1 - pj)]
-
-
 class PathPlanner:
     def __init__(self, init_map):
         self.global_map = init_map
         self.graph = self.update_graph(init_map)
 
-    def update_map(new_map):
+    def update_map(self, new_map):
         self.global_map = new_map
-        self.graph = update_graph(new_map)
+        self.graph = self.update_graph(new_map)
 
     def update_graph(self, current_map):
 
         # global ax
-
+        
         t_start = time.time()
         thinning = zs_thinning(current_map)
         t_end = time.time()
         print "time for thinning: " + str(t_end - t_start)
         t_start = time.time()
         joint_count = 0
+
+        cv2.imwrite("/home/ras26/catkin_ws/src/ras_map/map_image/map_msg.png", thinning)
 
         node_list = []
 
@@ -664,10 +660,8 @@ class PathPlanner:
         # plt.show()
         # plt.pause(10)
 
-        if temp_map[point_1[0]][point_1[1]] == 0 or temp_map[point_2[0]][point_2[1]] == 0:
+        if temp_map[point_2[0]][point_2[1]] == 0:
             print("invalid starting or ending position! You are colliding the wall there!")
-            empty_list = []
-            return empty_list, empty_list
 
         min_1 = 999999
         min_2 = 999999
@@ -696,7 +690,7 @@ class PathPlanner:
         node_21 = road_graph.connection[index_2[0]][0]
         node_22 = road_graph.connection[index_2[0]][1]
 
-        print node_11, node_12, node_21, node_22
+        # print node_11, node_12, node_21, node_22
 
         i_1 = index_1[0]
         j_1 = index_1[1]
@@ -732,9 +726,9 @@ class PathPlanner:
         l4 = abs(index_1[1] - road_graph.edge_list[index_1[0]].index(list(road_graph.nodes[node_12]))) + \
              abs(index_2[1] - road_graph.edge_list[index_2[0]].index(list(road_graph.nodes[node_22])))
 
-        print i_1, j_1, i_2, j_2
-        print ind1, ind2, ind3, ind4
-        print l1, l2, l3, l4
+        #print i_1, j_1, i_2, j_2
+        #print ind1, ind2, ind3, ind4
+        #print l1, l2, l3, l4
 
         for it in ind1:
             if not it == (0, 0):
@@ -840,31 +834,151 @@ class PathPlanner:
 
 
 def targetCallback(msg):
-    global start_point
-    global end_point
-    global new_target_flag
-
-    start_t = (msg.points[0].x, msg.points[0].y)
-    end_t = (msg.points[1].x, msg.points[1].y)
-    if start_t != start_point or end_t != end_point:
-        start_point = start_t
-        end_point = end_t
-        print("target changed! " + str(start_point) + "   " + str(end_point))
-        new_target_flag = True
+    global target_point
+    global planner_status
+    if planner_status == 3 or planner_status == 1:
+		target_t = (msg.points[0].x, msg.points[0].y)
+		if target_t != target_point:
+			target_point = target_t
+			print("target changed! " + str(target_point))
+			planner_status = 3
 
 
 def poseCallback(msg):
     global current_path
-    global next_target_flag
+    global next_target_num
+    global current_position
+    global time_start
+    global planner_1
+    global planner_status
+    global update_position
+    global target_point
+    global history
+    global starting_point
+    global wall_time
+    global is_new_
+    current_position = (msg.pose.position.x, msg.pose.position.y)
+    if not is_new_:
+		if len(current_path) > 0 and next_target_num < len(current_path):
+			dx = current_path[next_target_num][0] - msg.pose.position.x
+			dy = current_path[next_target_num][1] - msg.pose.position.y
+			distance = math.sqrt(dx * dx + dy * dy)
+			if distance <= 0.15:
+				next_target_num += 1
+				time_start = rospy.get_time()
 
-    if next_target_flag:
-        return
+		# if planner_status == 1 and time_start != 0.0 and rospy.get_time() - time_start > 15.0:
+		# what should it do here? in second round we should not stuck any more !
+		
+    else: 
+		pixel_current_position = truetopixel(current_position[0],current_position[1])
+		
+		if (target_point == (0, 0)):
+			starting_point = (105, 10)
+			max_dist = 0
+			for rand_node in history:
+				dist_temp = diagonal_distance(rand_node, pixel_current_position)
+				if dist_temp > max_dist:
+					max_dist = dist_temp
+					max_node = rand_node
+			"""
+			rand_num = randint(0, len(history)-1)
+			rand_node = history[rand_num]
+			print("rand_node" + str(rand_node))
+			while True:
+				if diagonal_distance(rand_node, pixel_current_position) < 10:
+					del history[rand_num]
+					rand_num = randint(0, len(history)-1)
+					rand_node = history[rand_num]
+					print("rand_node" + str(rand_node))
+				else:
+					print("rand_node" + str(rand_node))
+					break
+			"""
+			
+			target_point = pixeltotrue(max_node[1], max_node[0])
+			print("chosen farthest point " + str(max_node))
+			planner_status = 3
+		
+		if rospy.get_time() - wall_time > 180:
+			print("going home!!!!!!!!!!--------------------------------------------------")
+			target_point = pixeltotrue(starting_point[1], starting_point[0])
+			planner_status = 3
+			return
+		
+		for nd_i in xrange(len(history) - 1, -1, -1):
+			if diagonal_distance(history[nd_i], pixel_current_position) < 12:
+				print("WE HAVE MET: " + str(history[nd_i]) + "-----------------------------------")
+				del history[nd_i]
+		
+		if truedistance(target_point, current_position) < 0.12  and len(history) > 0:
+			print("reach target! resetting target")
+			max_dist = 0
+			for rand_node in history:
+				dist_temp = diagonal_distance(rand_node, pixel_current_position)
+				if dist_temp > max_dist:
+					max_dist = dist_temp
+					max_node = rand_node
+			target_point = pixeltotrue(max_node[1], max_node[0])
+			planner_status = 3
+			
+		if truedistance(current_position, update_position) > 0.3:
+			time_start = rospy.get_time()
+			update_position = current_position
+			print("moving!")
+		else:
+			if rospy.get_time() - time_start > 12 and len(history) > 0:
+				print("not moving! resetting target")
+				
+			    # reading the map or not
+				"""
+				maze_msg = rospy.wait_for_message("/map", Image)
+				bridge = CvBridge()
+				new_maze = bridge.imgmsg_to_cv2(maze_msg, "8UC1")
+				new_maze = cv2.bitwise_not(new_maze)
+				new_maze = cv2.resize(new_maze, (120, 120), interpolation=cv2.INTER_CUBIC)
+				plt.matshow(new_maze)
+				plt.pause(10)
+				planner_1.update_map(new_maze)
+				print("updated map, doing new plan")
+				"""
 
-    dx = current_path[-1][0] - msg.pose.position.x
-    dy = current_path[-1][1] - msg.pose.position.y
-    distance = math.sqrt(dx * dx + dy * dy)
-    if distance <= 0.12:
-        next_target_flag = True
+				max_dist = 0
+				for rand_node in history:
+					if diagonal_distance(rand_node, truetopixel(target_point[0], target_point[1])) < 20:
+						continue
+					dist_temp = diagonal_distance(rand_node, pixel_current_position)
+					if dist_temp > max_dist:
+						max_dist = dist_temp
+						max_node = rand_node
+				if max_dist == 0:
+					target_point = starting_point
+				else:
+					target_point = pixeltotrue(max_node[1], max_node[0])
+
+				time_start = rospy.get_time()
+				update_position = current_position
+				planner_status = 3
+			
+		
+def truedistance(point1, point2):
+	delta0 = point1[0] - point2[0]
+	delta1 = point1[1] - point2[1]
+	return math.sqrt(delta0*delta0 + delta1*delta1)		
+    
+
+def pixeltotrue(pi, pj):
+    x_max = 120.
+    y_max = 120.
+
+    return [(2.4 / y_max) * pi, (2.4 / x_max) * (x_max - 1 - pj)]
+
+
+def truetopixel(px, py):
+    x_max = 120.
+    y_max = 120.
+
+    return [int(x_max - 1 - (x_max/2.4)*py), int((y_max/2.4)*px)]
 
 
 if __name__ == "__main__":
@@ -873,19 +987,20 @@ if __name__ == "__main__":
     # ax = fig.add_subplot(111)
 
     # get an image representing the obstacles and walls
-    img_list = ["maze_2017.png", "maze2_more.png", "maze2_less.png"]
-    img_path = "/home/ras26/catkin_ws/src/path_planning/scripts/"
+    img_path = "/home/ras26/catkin_ws/src/ras_map/map_image/init_map.png"
 
     t_start = time.time()
-    original = cv2.imread(img_path + img_list[0])
+    original = cv2.imread(img_path)
+    
+    original = cv2.bitwise_not(original)
 
-    height, width = original.shape[:2]
+    print original.shape[:2]
 
     # resize the image to get lower resolution, this makes computational cost decrease much
     original = cv2.resize(original, (120, 120), interpolation=cv2.INTER_CUBIC)
-    print "image height" + str(120) + "image width" + str(120)
 
     gray = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
+    
     # use only binary map
     # with probabilistic occupancy, the threshold of this should be set carefully
     ret3, my_map_original = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -894,89 +1009,121 @@ if __name__ == "__main__":
 
     # ------------------------prepration work done-----------------------------
 
-    rospy.init_node('path_planning', anonymous=True)
+    rospy.init_node('path_planning', anonymous=False)
+    
+    # 0 for waiting, 1 for sending out path
+    planner_status = rospy.get_param('planner_status', 3)
+    is_new_ = rospy.get_param('is_explore', True)
+    
     pub = rospy.Publisher('guider', Float32MultiArray, queue_size=1)
     sub = rospy.Subscriber("target_point", Polygon, targetCallback)
-    # sub_pose = rospy.Subscriber("/localization/pose", PoseStamped, poseCallback)
-    rate = rospy.Rate(2)
-
-    """let's try find path between any two point!"""
-    test_path = planner_1.simple_exploration()
-    explore_path = []
-    for ii in range(len(test_path)-1):
-	    explore_path += planner_1.path_any_point(test_path[ii], test_path[ii+1], go_edge=True)
-    # explore_path.reverse()
-    print explore_path
-	
-    for num_i in xrange(len(explore_path) - 1, 0, -1):
-		if diagonal_distance(explore_path[num_i], explore_path[num_i-1]) <= 5:
-			del explore_path[num_i-1]
-	
-    manual_tour = [((90, 9), (12, 94)), ((12, 94), (105, 106)), ((105, 106), (40, 20))]
-
-    start_point = manual_tour[0][0]
-    end_point = manual_tour[0][1]
-
-    # ax.text(start_point[1], start_point[0], 'S', color='red', fontsize=12)
-    # ax.text(end_point[1], end_point[0], 'E', color='red', fontsize=12)
-
-    path2, pd2 = planner_1.path_any_point(start_point, end_point)
-
-    # print pd2
-    pdi = 0
-    while pdi < len(path2) - 1:
-        if diagonal_distance(path2[pdi], path2[pdi + 1]) <= 5:
-            del path2[pdi + 1]
-        else:
-            pdi += 1
-
-    # for pdi in range(0, len(explore_path)):
-    #    ax.text(explore_path[pdi][1] + 2, explore_path[pdi][0] + 2, str(pdi), color='white', fontsize=14)
-
-    path_msg = Float32MultiArray()
-    """
-    for pdi in range(1, len(path2)):
-        truepoint = pixeltotrue(path2[pdi][1], path2[pdi][0])
-        path_msg.data.append(truepoint[0])
-        path_msg.data.append(truepoint[1])
-        path_msg.data.append(0)
-        """
-    for pdi in range(2, len(explore_path)):
-        truepoint = pixeltotrue(explore_path[pdi][1], explore_path[pdi][0])
-        path_msg.data.append(truepoint[0])
-        path_msg.data.append(truepoint[1])
-    path_msg.data.append(0)
-
-    # plt.show()
-    # plt.pause(1)
+    if not is_new_:
+		sub_pose = rospy.Subscriber("/localization/pose", PoseStamped, poseCallback)
+    """do simple exploration"""
+    current_position = (0, 0)
+    target_point = (0, 0)
+    update_position = (0, 0)
+    starting_point = (0, 0)
     
-    next_target_flag = False
+    """create nodes list to travel"""
+    history = planner_1.graph.nodes[:]
+	
+    for nd_i in xrange(len(history) - 1, -1, -1):
+		if diagonal_distance(history[nd_i], [105, 10]) < 12:
+			del history[nd_i]
+			
+    for edge_noi in planner_1.graph.edge_list:
+		half_length = int(len(edge_noi) / 2)
+		history.append(tuple(edge_noi[half_length]))
+
+    print("this is the edge list " + str(history))
+    
+    command_num = 0
+    
+    path_msg = Float32MultiArray()
+    
+    time_start = rospy.get_time()
+    wall_time = rospy.get_time()
+    next_target_num = 0
     count = 1
-    command_num = 1
+    
+    current_path = []
+    
+    rate = rospy.Rate(2)
     while not rospy.is_shutdown():
-		"""
-        if next_target_flag and command_num < len(manual_tour):
-            start_point = manual_tour[command_num][0]
-            end_point = manual_tour[command_num][1]
-            path2, pd2 = planner_1.path_any_point(start_point, end_point)
-            # for pdi in range(1, len(path2)):
-            # 	ax.text(path2[pdi][1], path2[pdi][0], str(pdi), color='white', fontsize=14)
-            path_msg = Float32MultiArray()
-
-            for pdi in range(1, len(path2)):
-                truepoint = pixeltotrue(path2[pdi][1], path2[pdi][0])
-                path_msg.data.append(truepoint[0])
-                path_msg.data.append(truepoint[1])
-                # save the current path that is being published
-                current_path.append((truepoint[0], truepoint[1]))
-
-            path_msg.data.append(command_num)
-            command_num += 1
-            new_target_flag = False
-		"""
-		pub.publish(path_msg)
-		print "message sent " + str(count)
-		count += 1
-		print path_msg.data
+		print target_point, current_position
+		try:
+			msg = rospy.wait_for_message("/localization/pose", PoseStamped)
+			poseCallback(msg)
+			
+			if planner_status == 2:
+				print("exploration------------------------------------------------")
+				test_path = planner_1.simple_exploration()
+				explore_path = []
+				for ii in range(len(test_path)-1):
+					explore_path += planner_1.path_any_point(test_path[ii], test_path[ii+1], go_edge=True)
+				# explore_path.reverse()
+				print explore_path
+				
+				for num_i in xrange(len(explore_path) - 1, 0, -1):
+					if diagonal_distance(explore_path[num_i], explore_path[num_i-1]) <= 5:
+						del explore_path[num_i-1]
+				current_path = []
+				path_msg.data = []
+				for pdi in range(2, len(explore_path)):
+					truepoint = pixeltotrue(explore_path[pdi][1], explore_path[pdi][0])
+					path_msg.data.append(truepoint[0])
+					path_msg.data.append(truepoint[1])
+					current_path.append((truepoint[0], truepoint[1]))
+				path_msg.data.append(command_num)
+				command_num = 1 - command_num
+				next_target_num = 0
+				print path_msg.data
+				time_start = rospy.get_time()
+				
+			elif planner_status == 3:
+				if current_position != (0, 0) and target_point != (0, 0):
+					print("one target running-----------------------------------------------------")
+					print(truetopixel(target_point[0], target_point[1]))
+					path_temp, pd_temp = planner_1.path_any_point(truetopixel(current_position[0], current_position[1]),
+					truetopixel(target_point[0], target_point[1]))
+					for num_i in xrange(len([path_temp]) - 1, 0, -1):
+						if diagonal_distance(path_temp[num_i], path_temp[num_i-1]) <= 5:
+							del path_temp[num_i-1]
+							
+					current_path = []
+					x_dots = []
+					y_dots = []
+					path_msg.data = []
+					for pdi in range(1, len(path_temp)):
+						truepoint = pixeltotrue(path_temp[pdi][1], path_temp[pdi][0])
+						path_msg.data.append(truepoint[0])
+						path_msg.data.append(truepoint[1])
+						x_dots.append(path_temp[pdi][0])
+						y_dots.append(path_temp[pdi][1])
+						current_path.append((truepoint[0], truepoint[1]))
+					path_msg.data.append(command_num)
+					command_num = 1 - command_num
+					planner_status = 1
+					# plt.plot(x_dots, y_dots)
+					# plt.show()
+					next_target_num = 0
+					print path_msg.data
+					time_start = rospy.get_time()
+					
+			if planner_status == 1:
+				#print("sending message")
+				for times in range(2):
+					pub.publish(path_msg)
+					#print "message sent " + str(count)
+					count += 1
+					#print path_msg.data
+					rate.sleep()
+				planner_status = 1
+				print("waiting for pose")
+		except KeyboardInterrupt:
+			print("stoping node")
+			break
+		
 		rate.sleep()
         
