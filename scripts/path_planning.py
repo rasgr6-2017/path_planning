@@ -497,13 +497,12 @@ class PathPlanner:
         thinning = zs_thinning(current_map)
         t_end = time.time()
         print "time for thinning: " + str(t_end - t_start)
-        t_start = time.time()
+        
         joint_count = 0
 
-        cv2.imwrite("/home/ras26/catkin_ws/src/ras_map/map_image/map_msg.png", thinning)
 
         node_list = []
-
+        t_start = time.time()
         # find the joint node of branching point
         th, tw = thinning.shape[:2]
 
@@ -900,7 +899,7 @@ def poseCallback(msg):
 			print("chosen farthest point " + str(max_node))
 			planner_status = 3
 		
-		if rospy.get_time() - wall_time > 180:
+		if rospy.get_time() - wall_time > 240:
 			print("going home!!!!!!!!!!--------------------------------------------------")
 			target_point = pixeltotrue(starting_point[1], starting_point[0])
 			planner_status = 3
@@ -932,14 +931,18 @@ def poseCallback(msg):
 				
 			    # reading the map or not
 				"""
-				maze_msg = rospy.wait_for_message("/map", Image)
-				bridge = CvBridge()
-				new_maze = bridge.imgmsg_to_cv2(maze_msg, "8UC1")
+				new_maze = cv2.imread("/home/ras26/catkin_ws/src/ras_map/map_image/init_map.png")
 				new_maze = cv2.bitwise_not(new_maze)
-				new_maze = cv2.resize(new_maze, (120, 120), interpolation=cv2.INTER_CUBIC)
-				plt.matshow(new_maze)
-				plt.pause(10)
+				# new_maze = cv2.resize(new_maze, (120, 120), interpolation=cv2.INTER_CUBIC)
+				new_maze = cv2.cvtColor(new_maze, cv2.COLOR_RGB2GRAY)
+				ret3, new_maze = cv2.threshold(new_maze, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+				#plt.hist(new_maze.ravel(),256,[0,256]) 
+				#plt.show()
+				
+				# plt.matshow(new_maze)
+				# plt.pause(10)
 				planner_1.update_map(new_maze)
+				
 				print("updated map, doing new plan")
 				"""
 
@@ -997,7 +1000,7 @@ if __name__ == "__main__":
     print original.shape[:2]
 
     # resize the image to get lower resolution, this makes computational cost decrease much
-    original = cv2.resize(original, (120, 120), interpolation=cv2.INTER_CUBIC)
+    # original = cv2.resize(original, (120, 120), interpolation=cv2.INTER_CUBIC)
 
     gray = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
     
